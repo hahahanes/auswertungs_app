@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Untergrund-Auswertung</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --paper: #f2ede1;
+    --paper-2: #e8e1d0;
+    --ink: #2b2820;
+    --ink-2: #6b6555;
+    --line: #d3cab4;
+    --line-strong: #b8ab8c;
+    --accent: #3f6b4c;
+    --accent-2: #2d4f38;
+    --danger: #b0472b;
+    --card: #fbf8f0;
+
+    /* Untergrund-Farben – maximal unterscheidbar auf Kartenhintergrund */
+    --u-pflaster:   #8b2f8b;
+    --u-schotter:   #d55e00;
+    --u-plattenweg: #0072b2;
+    --u-asphalt:    #1a1a1a;
+    --u-sand:       #ffe74a;
+    --u-waldweg:    #009e4f;
+    --u-wiese:      #7ee038;
+    --u-trail:      #e5001f;
+    --u-none:       #9a9a9a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    line-height: 1.5;
+    background-image: radial-gradient(circle at 1px 1px, rgba(120,108,80,.10) 1px, transparent 0);
+    background-size: 22px 22px;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 32px 20px 80px; }
+
+  header { border-bottom: 3px double var(--line-strong); padding-bottom: 18px; margin-bottom: 26px; }
+  .brow { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--ink-2); }
+  h1 { margin: 4px 0 2px; font-size: 34px; letter-spacing: -.5px; font-weight: 700; }
+  h1 .paw { font-family: serif; }
+  header .lead { color: var(--ink-2); font-size: 15px; max-width: 62ch; }
+
+  /* Dropzones */
+  .drops { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 8px; }
+  @media (max-width: 640px){ .drops { grid-template-columns: 1fr; } }
+  .drop {
+    background: var(--card); border: 2px dashed var(--line-strong); border-radius: 4px;
+    padding: 22px 18px; text-align: center; cursor: pointer; transition: .15s;
+    position: relative;
+  }
+  .drop:hover { border-color: var(--accent); background: #fff; }
+  .drop.over { border-color: var(--accent); background: #eef4ec; border-style: solid; }
+  .drop.loaded { border-style: solid; border-color: var(--accent); background: #eef4ec; }
+  .drop .dico { font-size: 30px; display: block; margin-bottom: 6px; }
+  .drop .dtitle { font-weight: 700; font-size: 16px; }
+  .drop .dhint { font-size: 12.5px; color: var(--ink-2); margin-top: 3px; font-family: ui-monospace, monospace; }
+  .drop .dstatus { margin-top: 8px; font-size: 13px; color: var(--accent-2); font-weight: 700; min-height: 18px; }
+  .drop input { display: none; }
+  .drop.err { border-color: var(--danger); background: #f7e9e4; }
+  .drop.err .dstatus { color: var(--danger); }
+
+  .go-row { text-align: center; margin: 18px 0 8px; }
+  .go-btn {
+    background: var(--accent); color: #f5f1e6; border: none; border-radius: 3px;
+    font-family: inherit; font-size: 16px; font-weight: 700; letter-spacing: .5px;
+    padding: 13px 34px; cursor: pointer; transition: .15s; box-shadow: 0 2px 0 var(--accent-2);
+  }
+  .go-btn:hover:not(:disabled) { background: var(--accent-2); }
+  .go-btn:disabled { opacity: .4; cursor: not-allowed; box-shadow: none; }
+
+  .results { display: none; margin-top: 34px; }
+  .results.show { display: block; animation: fade .3s; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  .section-h {
+    font-family: ui-monospace, monospace; font-size: 12px; letter-spacing: 2px;
+    text-transform: uppercase; color: var(--ink-2); margin: 30px 0 12px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .section-h::after { content:""; flex:1; height:2px; background: var(--line); }
+
+  /* Summary cards */
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 640px){ .summary { grid-template-columns: repeat(2,1fr); } }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 14px 16px; }
+  .stat .k { font-family: ui-monospace, monospace; font-size: 11px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--ink-2); }
+  .stat .v { font-size: 26px; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
+  .stat .v small { font-size: 14px; color: var(--ink-2); font-weight: 400; }
+
+  /* Stacked distribution bar */
+  .distbar { display: flex; height: 40px; border-radius: 4px; overflow: hidden; border: 1px solid var(--line-strong); margin-bottom: 14px; }
+  .distbar .seg { position: relative; min-width: 2px; }
+  .distbar .seg span {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.4);
+    white-space: nowrap; overflow: hidden;
+  }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; background: var(--card);
+    border: 1px solid var(--line); border-radius: 4px; overflow: hidden; font-size: 14px; }
+  th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+  th { font-family: ui-monospace, monospace; font-size: 11px; letter-spacing: 1px;
+    text-transform: uppercase; color: var(--ink-2); background: var(--paper-2); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  tr:last-child td { border-bottom: none; }
+  tr.total td { font-weight: 700; background: var(--paper-2); }
+  .swatch { display: inline-block; width: 13px; height: 13px; border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
+
+  /* Map */
+  #map { height: 440px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--paper-2); }
+  .hint-pin { background: none; border: none; }
+  .hint-pin .pin {
+    display: flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: #004d40; color: #fff; border: 2.5px solid #fff;
+    font-family: ui-monospace, monospace; font-size: 12px; font-weight: 700;
+    box-shadow: 0 1px 4px rgba(0,0,0,.5);
+  }
+  .hint-pin .pin-danger { background: #b0003a; }
+  .map-note { font-size: 12px; color: var(--ink-2); margin-top: 6px; font-family: ui-monospace, monospace; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px 18px; margin-top: 12px; }
+  .legend .li { display: flex; align-items: center; font-size: 13px; }
+
+  /* Hints list */
+  .hints-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr)); gap: 8px; }
+  .hint-card { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--ink-2);
+    border-radius: 3px; padding: 8px 12px; font-size: 13px; }
+  .hint-card.danger { border-left-color: var(--danger); }
+  .hint-card .hn { font-weight: 700; }
+  .hint-card .hnr {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 19px; height: 19px; border-radius: 50%;
+    background: #004d40; color: #fff; margin-right: 7px;
+    font-family: ui-monospace, monospace; font-size: 11px; vertical-align: 1px;
+  }
+  .hint-card .hnr-danger { background: #b0003a; }
+  .hint-card .hm { font-size: 11px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .hint-card .hnote { font-style: italic; color: var(--accent-2); margin-top: 2px; }
+
+  .warn { background: #f7efe0; border: 1px solid var(--line-strong); border-left: 3px solid var(--u-sand);
+    padding: 10px 14px; border-radius: 3px; font-size: 13px; margin: 10px 0; color: #6b5a2a; }
+  .dl-row { margin-top: 14px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .print-head { display: none; }
+
+/* ---------- Druck / PDF ---------- */
+@media print {
+  @page { size: A4 portrait; margin: 14mm 12mm; }
+
+  html, body {
+    background: #fff !important;
+    background-image: none !important;
+    color: #000;
+    font-size: 10.5pt;
+  }
+  /* Farben in Balken, Swatches und Karte erhalten */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+
+  .wrap { max-width: none; padding: 0; }
+
+  /* Bedienelemente raus */
+  header, .drops, .go-row, .dl-row, .map-note { display: none !important; }
+
+  /* Druck-Kopfzeile rein */
+  .print-head {
+    display: block !important;
+    border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 14px;
+  }
+  .print-head .ph-brow {
+    font-family: ui-monospace, monospace; font-size: 8pt; letter-spacing: 2px;
+    text-transform: uppercase; color: #444;
+  }
+  .print-head .ph-title { font-size: 18pt; font-weight: 700; margin: 2px 0 1px; }
+  .print-head .ph-meta { font-size: 9pt; color: #444; }
+
+  .results { display: block !important; }
+
+  .section-h {
+    color: #000; font-size: 8.5pt; margin: 14px 0 7px;
+    break-after: avoid; page-break-after: avoid;
+  }
+  .section-h::after { background: #999; }
+
+  /* Überblick kompakt */
+  .summary { grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .stat { border: 1px solid #999; padding: 7px 9px; background: #fff !important; }
+  .stat .v { font-size: 13pt; }
+
+  .warn { border: 1px solid #999; border-left: 3px solid #000; background: #f4f4f4 !important; font-size: 9pt; }
+
+  .distbar { height: 26px; border: 1px solid #666; break-inside: avoid; }
+  .distbar .seg span { font-size: 7.5pt; }
+
+  table { border: 1px solid #999; font-size: 9pt; break-inside: auto; }
+  th { background: #eee !important; color: #000; font-size: 7.5pt; }
+  th, td { padding: 4px 8px; border-bottom: 1px solid #ccc; }
+  thead { display: table-header-group; }   /* Kopfzeile auf Folgeseiten wiederholen */
+  tr { break-inside: avoid; page-break-inside: avoid; }
+  tr.total td { background: #eee !important; }
+
+  #map { height: 105mm; border: 1px solid #666; break-inside: avoid; page-break-inside: avoid; }
+  .legend { gap: 8px 14px; font-size: 9pt; break-inside: avoid; }
+
+  .hints-list { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .hint-card {
+    border: 1px solid #ccc; border-left: 3px solid #666; background: #fff !important;
+    font-size: 9pt; padding: 5px 8px; break-inside: avoid; page-break-inside: avoid;
+  }
+  .hint-card.danger { border-left-color: #000; border-left-width: 4px; }
+  .hint-card .hnote { color: #333; }
+  .hint-card .hnr { background: #004d40 !important; color: #fff !important; }
+  .hint-card .hnr-danger { background: #b0003a !important; }
+  .hint-pin .pin { background: #004d40 !important; color: #fff !important; }
+  .hint-pin .pin-danger { background: #b0003a !important; }
+
+  /* Karte und Hinweise jeweils auf neuer Seite beginnen, wenn nötig */
+  .page-break-before { break-before: page; page-break-before: always; }
+}
+  .dl-btn { background: var(--paper-2); border: 1px solid var(--line-strong); color: var(--ink);
+    font-family: inherit; font-size: 14px; padding: 9px 18px; border-radius: 3px; cursor: pointer; }
+  .dl-btn:hover { background: #fff; }
+  .empty-hint { color: var(--ink-2); font-style: italic; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brow">Scouting-Auswertung</div>
+    <h1>Untergrund&#8209;Auswertung</h1>
+    <p class="lead">Garmin&#8209;Track und die Marker aus der Scout&#8209;App zusammenführen. Ergebnis: Kilometer und Anteile je Untergrund, alle Hinweise entlang der Strecke und eine eingefärbte Karte.</p>
+  </header>
+
+  <div class="drops">
+    <label class="drop" id="dropGpx">
+      <span class="dico">🛰️</span>
+      <span class="dtitle">Garmin&#8209;Track</span>
+      <span class="dhint">.gpx mit Trackpunkten</span>
+      <span class="dstatus" id="statusGpx"></span>
+      <input type="file" id="fileGpx" accept=".gpx,application/gpx+xml,text/xml">
+    </label>
+    <label class="drop" id="dropCsv">
+      <span class="dico">📍</span>
+      <span class="dtitle">Scout&#8209;Marker</span>
+      <span class="dhint">.csv aus der Scout&#8209;App</span>
+      <span class="dstatus" id="statusCsv"></span>
+      <input type="file" id="fileCsv" accept=".csv,text/csv">
+    </label>
+  </div>
+
+  <div class="go-row">
+    <button class="go-btn" id="goBtn" disabled>Auswertung erstellen</button>
+  </div>
+
+  <div class="results" id="results">
+    <div class="print-head" id="printHead"></div>
+    <div class="section-h">Überblick</div>
+    <div class="summary" id="summary"></div>
+    <div id="gapWarn"></div>
+
+    <div class="section-h">Verteilung der Untergründe</div>
+    <div class="distbar" id="distbar"></div>
+    <table id="distTable"></table>
+
+    <div class="section-h">Abschnitte</div>
+    <table id="segTable"></table>
+
+    <div class="section-h page-break-before">Karte</div>
+    <div id="map"></div>
+    <div class="map-note" id="mapNote"></div>
+    <div class="legend" id="legend"></div>
+
+    <div class="section-h">Hinweise entlang der Strecke</div>
+    <div class="hints-list" id="hintsList"></div>
+
+    <div class="dl-row">
+      <button class="dl-btn" id="dlReport">⤓ Bericht als CSV speichern</button>
+      <button class="dl-btn" id="dlPdf">🖨 Als PDF speichern</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+
+// ---------- Untergrund-Definitionen (müssen zur Scout-App passen) ----------
+const SURF = {
+  pflaster:   { name: "Pflaster",     color: "#8b2f8b" },
+  schotter:   { name: "Schotter",     color: "#d55e00" },
+  plattenweg: { name: "Plattenweg",   color: "#0072b2" },
+  asphalt:    { name: "Asphalt",      color: "#1a1a1a" },
+  sand:       { name: "Sand",         color: "#ffe74a" },
+  waldweg:    { name: "Waldweg",      color: "#009e4f" },
+  wiese:      { name: "Wiese/Gras",   color: "#7ee038" },
+  trail:      { name: "Trail/schmal", color: "#e5001f" },
+  _none:      { name: "(ohne Marker)",color: "#9a9a9a" },
+};
+
+let trackPts = [];   // {lat, lon, time(ms)}
+let markers = [];    // {timeMs, kind, typeId, name, note, lat, lon}
+let trackName = "";
+let result = null;   // berechnetes Ergebnis
+let map = null, mapLayers = [];
+
+// ---------- Datei-Handling ----------
+function setupDrop(dropId, inputId, statusId, kind) {
+  const drop = document.getElementById(dropId);
+  const input = document.getElementById(inputId);
+  const status = document.getElementById(statusId);
+  input.addEventListener("change", () => { if (input.files[0]) handleFile(input.files[0], kind, drop, status); });
+  ["dragover","dragenter"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave","dragend"].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove("over")));
+  drop.addEventListener("drop", e => {
+    e.preventDefault(); drop.classList.remove("over");
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0], kind, drop, status);
+  });
+}
+function handleFile(file, kind, drop, status) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      if (kind === "gpx") { parseGPX(reader.result); status.textContent = `✓ ${trackPts.length} Trackpunkte`; }
+      else { parseCSV(reader.result); status.textContent = `✓ ${markers.length} Marker`; }
+      drop.classList.remove("err"); drop.classList.add("loaded");
+    } catch (err) {
+      drop.classList.add("err");
+      status.textContent = "✗ " + err.message;
+      if (kind === "gpx") trackPts = []; else markers = [];
+    }
+    updateGo();
+  };
+  reader.onerror = () => { drop.classList.add("err"); status.textContent = "✗ Datei nicht lesbar"; };
+  reader.readAsText(file);
+}
+function updateGo() {
+  document.getElementById("goBtn").disabled = !(trackPts.length && markers.length);
+}
+
+// ---------- Parser ----------
+function parseGPX(text) {
+  const xml = new DOMParser().parseFromString(text, "application/xml");
+  if (xml.querySelector("parsererror")) throw new Error("GPX defekt");
+  const pts = [...xml.querySelectorAll("trkpt")];
+  if (!pts.length) throw new Error("Keine Trackpunkte gefunden");
+  trackPts = pts.map(p => {
+    const t = p.querySelector("time");
+    return {
+      lat: parseFloat(p.getAttribute("lat")),
+      lon: parseFloat(p.getAttribute("lon")),
+      time: t ? Date.parse(t.textContent) : NaN
+    };
+  }).filter(p => isFinite(p.lat) && isFinite(p.lon));
+  const withTime = trackPts.filter(p => isFinite(p.time)).length;
+  if (withTime < trackPts.length * 0.5) throw new Error("Trackpunkte ohne Zeit");
+  const nm = xml.querySelector("trk > name") || xml.querySelector("metadata > name");
+  trackName = nm && nm.textContent ? nm.textContent.trim() : "";
+}
+function nameStr(n){ return n && n.textContent ? n.textContent.trim() : ""; }
+
+function parseCSV(text) {
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) throw new Error("CSV leer");
+  const delim = (lines[0].match(/;/g)||[]).length >= (lines[0].match(/,/g)||[]).length ? ";" : ",";
+  const header = splitCsvLine(lines[0], delim).map(h => h.trim().toLowerCase());
+  const idx = name => header.indexOf(name);
+  const iTime = idx("zeit_iso"), iKind = idx("art"), iType = idx("typ"),
+        iName = idx("name"), iNote = idx("notiz"), iLat = idx("lat"), iLon = idx("lon"), iTrack = idx("track");
+  if (iTime < 0 || iKind < 0) throw new Error("Falsches CSV-Format");
+  markers = [];
+  const expected = header.length;
+  for (let i = 1; i < lines.length; i++) {
+    let c = splitCsvLine(lines[i], delim);
+    // Unmaskiertes Trennzeichen in der Notiz (z.B. nach Excel-Rundreise):
+    // überzählige Felder wieder in die Notizspalte zurückführen
+    if (c.length > expected && iNote >= 0) {
+      const extra = c.length - expected;
+      const merged = c.slice(iNote, iNote + extra + 1).join(delim);
+      c = c.slice(0, iNote).concat([merged], c.slice(iNote + extra + 1));
+    }
+    const timeMs = Date.parse(c[iTime]);
+    if (!isFinite(timeMs)) continue;
+    markers.push({
+      timeMs,
+      kind: c[iKind],
+      typeId: iType >= 0 ? c[iType] : "",
+      name: iName >= 0 ? c[iName] : "",
+      note: iNote >= 0 ? c[iNote] : "",
+      lat: iLat >= 0 && c[iLat] ? parseFloat(c[iLat]) : null,
+      lon: iLon >= 0 && c[iLon] ? parseFloat(c[iLon]) : null,
+    });
+    if (iTrack >= 0 && c[iTrack] && !trackName) trackName = c[iTrack];
+  }
+  markers.sort((a,b) => a.timeMs - b.timeMs);
+  if (!markers.length) throw new Error("Keine gültigen Zeilen");
+}
+function splitCsvLine(line, delim) {
+  const out = []; let cur = "", q = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (q) {
+      if (ch === '"' && line[i+1] === '"') { cur += '"'; i++; }
+      else if (ch === '"') q = false;
+      else cur += ch;
+    } else {
+      if (ch === '"') q = true;
+      else if (ch === delim) { out.push(cur); cur = ""; }
+      else cur += ch;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
+// ---------- Geo ----------
+function haversine(a, b) {
+  const R = 6371000, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
+  const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+// ---------- Kernberechnung ----------
+function compute() {
+  // Untergrund-Marker (mit Zeit) chronologisch; Ende-Marker begrenzt
+  const surfMarkers = markers.filter(m => m.kind === "surface").sort((a,b)=>a.timeMs-b.timeMs);
+  const endMarker = markers.find(m => m.kind === "end");
+  const endTime = endMarker ? endMarker.timeMs : Infinity;
+
+  // Track auf gültige Zeit + bis Ende begrenzen, chronologisch
+  const pts = trackPts.filter(p => isFinite(p.time)).sort((a,b)=>a.time-b.time);
+
+  function surfaceAt(t) {
+    let cur = "_none";
+    for (const m of surfMarkers) {
+      if (m.timeMs <= t) cur = m.typeId; else break;
+    }
+    return cur;
+  }
+
+  const dist = {};              // typeId -> meter
+  let total = 0, counted = 0, beforeFirst = 0, afterEnd = 0;
+  const firstSurfTime = surfMarkers.length ? surfMarkers[0].timeMs : Infinity;
+
+  const segments = [];          // {surf, startKm, endKm, lengthM, startTime, endTime}
+  let curSeg = null;
+  const kmAtTime = [];          // {t, km} zum Nachschlagen für Hinweise
+
+  for (let i = 1; i < pts.length; i++) {
+    const d = haversine(pts[i-1], pts[i]);
+    if (!isFinite(d) || d > 2000) continue; // Ausreißer (GPS-Sprung) überspringen
+    total += d;
+    const midT = (pts[i-1].time + pts[i].time) / 2;
+    kmAtTime.push({ t: pts[i].time, km: total });
+    if (midT > endTime) { afterEnd += d; continue; }
+    if (midT < firstSurfTime) { beforeFirst += d; }
+    const s = surfaceAt(midT);
+    dist[s] = (dist[s] || 0) + d;
+    counted += d;
+
+    // Abschnitte bilden
+    if (!curSeg || curSeg.surf !== s) {
+      if (curSeg) { curSeg.endM = total - d; curSeg.endTime = pts[i-1].time; segments.push(curSeg); }
+      curSeg = { surf: s, startM: total - d, lengthM: 0, startTime: pts[i-1].time };
+    }
+    curSeg.lengthM += d;
+  }
+  if (curSeg) { curSeg.endM = total; curSeg.endTime = pts.length ? pts[pts.length-1].time : 0; segments.push(curSeg); }
+
+  // km-Position für jeden Hinweis über die Zeitachse
+  function kmAt(t) {
+    if (!kmAtTime.length) return null;
+    if (t <= kmAtTime[0].t) return 0;
+    for (let i = 1; i < kmAtTime.length; i++) {
+      if (kmAtTime[i].t >= t) return kmAtTime[i-1].km;
+    }
+    return kmAtTime[kmAtTime.length-1].km;
+  }
+
+  // Zeitabgleich-Check
+  const trackStart = pts.length ? pts[0].time : 0;
+  const trackEnd = pts.length ? pts[pts.length-1].time : 0;
+  const markerTimes = markers.map(m=>m.timeMs);
+  const mMin = Math.min(...markerTimes), mMax = Math.max(...markerTimes);
+  const overlap = !(mMax < trackStart || mMin > trackEnd);
+
+  const hints = markers.filter(m => m.kind === "hint" || m.kind === "note")
+    .sort((a,b) => a.timeMs - b.timeMs)
+    .map((h, i) => ({ ...h, nr: i + 1, km: kmAt(h.timeMs) }));
+
+  return {
+    dist, total, counted, beforeFirst, afterEnd,
+    trackStart, trackEnd, mMin, mMax, overlap,
+    hasEnd: !!endMarker, pts, segments, hints
+  };
+}
+
+// ---------- Rendering ----------
+function fmtKm(m){ return (m/1000).toFixed(2); }
+function pct(part, whole){ return whole > 0 ? (part/whole*100) : 0; }
+
+function renderAll() {
+  result = compute();
+  const r = result;
+  document.getElementById("results").classList.add("show");
+
+  // Summary
+  const dur = (r.trackEnd - r.trackStart);
+  const durStr = isFinite(dur) && dur>0 ? fmtDuration(dur) : "–";
+  const nSurf = Object.keys(r.dist).filter(k=>k!=="_none").length;
+  document.getElementById("summary").innerHTML = `
+    ${stat("Track", trackName || "ohne Namen")}
+    ${stat("Gesamtstrecke", `${fmtKm(r.total)} <small>km</small>`)}
+    ${stat("Untergründe", `${nSurf}`)}
+    ${stat("Dauer", durStr)}
+  `;
+
+  // Gap-Warnungen
+  let warn = "";
+  if (!r.overlap) warn += `<div class="warn">⚠ Zeitbereiche von Track und Markern überschneiden sich nicht. Stimmen die Uhren von Garmin und Handy? Ohne Überschneidung ist keine Zuordnung möglich.</div>`;
+  if (r.beforeFirst > 20) warn += `<div class="warn">⚠ ${fmtKm(r.beforeFirst)} km vor dem ersten Untergrund-Marker – als „(ohne Marker)" gewertet. Tipp: gleich zu Beginn den Startuntergrund tippen.</div>`;
+  if (!r.hasEnd) warn += `<div class="warn">⚠ Kein Ende-Marker gesetzt – der letzte Untergrund läuft bis zum Track-Ende. Für exakte Werte künftig „Ende" tippen.</div>`;
+  if (r.afterEnd > 20) warn += `<div class="warn">ℹ ${fmtKm(r.afterEnd)} km nach dem Ende-Marker wurden ausgeklammert.</div>`;
+  document.getElementById("gapWarn").innerHTML = warn;
+
+  // Distribution
+  renderDistribution(r);
+  renderSegments(r);
+  renderHints(r);
+  try { renderMap(r); }
+  catch (err) {
+    document.getElementById("mapNote").textContent = "Karte nicht verfügbar (offline?). Alle Zahlen oben stimmen trotzdem.";
+  }
+}
+function stat(k,v){ return `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`; }
+function fmtDuration(ms){
+  const min = Math.round(ms/60000), h = Math.floor(min/60), m = min%60;
+  return h ? `${h} h ${m} min` : `${m} min`;
+}
+
+function sortedSurfaces(dist) {
+  return Object.keys(dist)
+    .filter(k => dist[k] > 0)
+    .sort((a,b) => dist[b]-dist[a]);
+}
+
+function renderDistribution(r) {
+  const keys = sortedSurfaces(r.dist);
+  const bar = document.getElementById("distbar");
+  bar.innerHTML = keys.map(k => {
+    const p = pct(r.dist[k], r.counted);
+    const def = SURF[k] || SURF._none;
+    return `<div class="seg" style="width:${p}%;background:${def.color}">
+      <span>${p>=8 ? def.name+" "+p.toFixed(0)+"%" : ""}</span></div>`;
+  }).join("");
+
+  const rows = keys.map(k => {
+    const def = SURF[k] || SURF._none;
+    return `<tr>
+      <td><span class="swatch" style="background:${def.color}"></span>${def.name}</td>
+      <td class="num">${fmtKm(r.dist[k])} km</td>
+      <td class="num">${pct(r.dist[k], r.counted).toFixed(1)} %</td>
+    </tr>`;
+  }).join("");
+  document.getElementById("distTable").innerHTML = `
+    <thead><tr><th>Untergrund</th><th class="num">Strecke</th><th class="num">Anteil</th></tr></thead>
+    <tbody>${rows}
+      <tr class="total"><td>Summe (zugeordnet)</td><td class="num">${fmtKm(r.counted)} km</td><td class="num">100 %</td></tr>
+    </tbody>`;
+}
+
+function renderSegments(r) {
+  const t = document.getElementById("segTable");
+  if (!r.segments.length) { t.innerHTML = `<tbody><tr><td class="empty-hint">Keine Abschnitte.</td></tr></tbody>`; return; }
+  const rows = r.segments.map((s,i) => {
+    const def = SURF[s.surf]||SURF._none;
+    return `<tr>
+      <td class="num">${i+1}</td>
+      <td><span class="swatch" style="background:${def.color}"></span>${def.name}</td>
+      <td class="num">${fmtKm(s.startM)} – ${fmtKm(s.endM)}</td>
+      <td class="num">${fmtKm(s.lengthM)} km</td>
+    </tr>`;
+  }).join("");
+  t.innerHTML = `<thead><tr><th class="num">#</th><th>Untergrund</th><th class="num">von – bis (km)</th><th class="num">Länge</th></tr></thead><tbody>${rows}</tbody>`;
+}
+
+function renderMap(r) {
+  const note = document.getElementById("mapNote");
+  const pts = r.pts;
+  if (!pts.length) { note.textContent = "Keine Kartenpunkte."; return; }
+  if (typeof L === "undefined") {
+    document.getElementById("map").style.display = "none";
+    note.textContent = "Kartenanzeige braucht Internet (Leaflet + Kacheln). Zahlen und Tabelle oben sind vollständig.";
+    return;
+  }
+
+  if (!map) {
+    map = L.map("map", { scrollWheelZoom: false });
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+      maxZoom: 19, subdomains: "abcd",
+      attribution: "© OpenStreetMap, © CARTO"
+    }).addTo(map);
+  }
+  mapLayers.forEach(l => map.removeLayer(l)); mapLayers = [];
+
+  // Track in Untergrund-Segmente einfärben
+  const surfMarkers = markers.filter(m=>m.kind==="surface").sort((a,b)=>a.timeMs-b.timeMs);
+  const endMarker = markers.find(m=>m.kind==="end");
+  const endTime = endMarker ? endMarker.timeMs : Infinity;
+  function surfaceAt(t){ let cur="_none"; for(const m of surfMarkers){ if(m.timeMs<=t) cur=m.typeId; else break; } return cur; }
+
+  const chrono = pts.filter(p=>isFinite(p.time)).sort((a,b)=>a.time-b.time);
+  let seg = [], segSurf = null;
+  const allLatLng = [];
+  for (const p of chrono) {
+    if (p.time > endTime) break;
+    const s = surfaceAt(p.time);
+    allLatLng.push([p.lat, p.lon]);
+    if (segSurf === null) { segSurf = s; seg = [[p.lat,p.lon]]; continue; }
+    if (s === segSurf) { seg.push([p.lat,p.lon]); }
+    else {
+      seg.push([p.lat,p.lon]);
+      drawSeg(seg, segSurf);
+      seg = [[p.lat,p.lon]]; segSurf = s;
+    }
+  }
+  if (seg.length > 1) drawSeg(seg, segSurf);
+
+  function drawSeg(latlngs, surf) {
+    const def = SURF[surf] || SURF._none;
+    const casing = L.polyline(latlngs, { color: "#ffffff", weight: 10, opacity: .95, lineCap: "round", lineJoin: "round" }).addTo(map);
+    const line = L.polyline(latlngs, { color: def.color, weight: 6, opacity: 1, lineCap: "round", lineJoin: "round" }).addTo(map);
+    mapLayers.push(casing, line);
+  }
+
+  // Hinweis-Marker mit Nummer
+  r.hints.forEach(h => {
+    if (h.lat == null || h.lon == null) return;
+    const danger = isDanger(h.typeId);
+    const icon = L.divIcon({
+      className: "hint-pin",
+      html: `<span class="pin${danger ? " pin-danger" : ""}">${h.nr}</span>`,
+      iconSize: [26,26], iconAnchor: [13,13]
+    });
+    const mk = L.marker([h.lat,h.lon], { icon, title: `${h.nr}. ${h.name}` }).addTo(map);
+    mk.bindPopup(`<b>${h.nr}. ${escapeHtml(h.name)}</b>${h.km!=null ? "<br>km "+fmtKm(h.km) : ""}${h.note ? "<br>"+escapeHtml(h.note) : ""}`);
+    mapLayers.push(mk);
+  });
+
+  if (allLatLng.length) map.fitBounds(allLatLng, { padding: [30,30] });
+  setTimeout(()=>map.invalidateSize(), 100);
+  note.textContent = "Linie nach Untergrund eingefärbt · nummerierte Punkte = Hinweise (rot = Warnung), Nummern entsprechen der Liste unten. Kartenkacheln benötigen Internet.";
+
+  // Legende
+  const usedSurf = sortedSurfaces(r.dist);
+  document.getElementById("legend").innerHTML = usedSurf.map(k => {
+    const def = SURF[k]||SURF._none;
+    return `<span class="li"><span class="swatch" style="background:${def.color}"></span>${def.name}</span>`;
+  }).join("");
+}
+
+const DANGER_TYPES = new Set(["verbot","privatweg","gefahr","naturschutz","bahn","strasse","acker","seehang","militaer","friedhof","matsch"]);
+function isDanger(typeId){ return DANGER_TYPES.has(typeId); }
+
+function renderHints(r) {
+  const list = document.getElementById("hintsList");
+  if (!r.hints.length) { list.innerHTML = `<div class="empty-hint">Keine Hinweise erfasst.</div>`; return; }
+  list.innerHTML = r.hints.map(h => {
+    const t = new Date(h.timeMs).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"});
+    const km = h.km != null ? `km ${fmtKm(h.km)} · ` : "";
+    const coord = h.lat!=null ? `${h.lat.toFixed(5)}, ${h.lon.toFixed(5)}` : "ohne GPS";
+    return `<div class="hint-card ${isDanger(h.typeId)?"danger":""}">
+      <div class="hn"><span class="hnr${isDanger(h.typeId)?" hnr-danger":""}">${h.nr}</span>${escapeHtml(h.name)}</div>
+      <div class="hm">${km}${t} · ${coord}</div>
+      ${h.note ? `<div class="hnote">„${escapeHtml(h.note)}"</div>` : ""}
+    </div>`;
+  }).join("");
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// ---------- Bericht-Export ----------
+function downloadReport() {
+  if (!result) return;
+  const r = result;
+  const rows = [];
+
+  // Block 1: Kopf
+  rows.push(["Untergrund-Auswertung"]);
+  rows.push(["Track", trackName || ""]);
+  rows.push(["Gesamtstrecke_km", fmtKm(r.total)]);
+  rows.push([]);
+
+  // Block 2: Untergründe gesamt
+  rows.push(["UNTERGRÜNDE GESAMT"]);
+  rows.push(["untergrund","km","anteil_prozent"]);
+  sortedSurfaces(r.dist).forEach(k =>
+    rows.push([(SURF[k]||SURF._none).name, fmtKm(r.dist[k]), pct(r.dist[k], r.counted).toFixed(1)]));
+  rows.push(["Summe zugeordnet", fmtKm(r.counted), "100"]);
+  rows.push([]);
+
+  // Block 3: Abschnitte in Reihenfolge der Strecke
+  rows.push(["ABSCHNITTE"]);
+  rows.push(["nr","untergrund","von_km","bis_km","laenge_km","uhrzeit_start"]);
+  r.segments.forEach((s, i) => {
+    rows.push([
+      i+1,
+      (SURF[s.surf]||SURF._none).name,
+      fmtKm(s.startM), fmtKm(s.endM), fmtKm(s.lengthM),
+      new Date(s.startTime).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"})
+    ]);
+  });
+  rows.push([]);
+
+  // Block 4: Hinweise
+  rows.push(["HINWEISE"]);
+  rows.push(["nr","hinweis","bei_km","uhrzeit","lat","lon","notiz"]);
+  if (!r.hints.length) {
+    rows.push(["", "keine Hinweise erfasst", "", "", "", "", ""]);
+  } else {
+    r.hints.forEach(h => {
+      rows.push([
+        h.nr,
+        h.name,
+        h.km != null ? fmtKm(h.km) : "",
+        new Date(h.timeMs).toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}),
+        h.lat != null ? h.lat.toFixed(6) : "",
+        h.lon != null ? h.lon.toFixed(6) : "",
+        h.note || ""
+      ]);
+    });
+  }
+
+  const csv = rows.map(row => row.map(c => {
+    const s = String(c); return /[",;\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+  }).join(";")).join("\n");
+  const blob = new Blob(["\uFEFF"+csv], {type:"text/csv"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (trackName ? trackName.replace(/[^\w]+/g,"-").toLowerCase() : "scout") + "-auswertung.csv";
+  a.click();
+}
+
+// ---------- Init ----------
+setupDrop("dropGpx","fileGpx","statusGpx","gpx");
+setupDrop("dropCsv","fileCsv","statusCsv","csv");
+document.getElementById("goBtn").onclick = renderAll;
+document.getElementById("dlReport").onclick = downloadReport;
+document.getElementById("dlPdf").onclick = printReport;
+
+function printReport() {
+  if (!result) return;
+  const r = result;
+  const now = new Date().toLocaleDateString("de-DE", { day:"2-digit", month:"long", year:"numeric" });
+  const tourDate = r.trackStart ? new Date(r.trackStart).toLocaleDateString("de-DE",
+    { day:"2-digit", month:"long", year:"numeric" }) : "";
+  document.getElementById("printHead").innerHTML = `
+    <div class="ph-brow">Scouting-Dokumentation</div>
+    <div class="ph-title">${escapeHtml(trackName || "Untergrund-Auswertung")}</div>
+    <div class="ph-meta">${tourDate ? "Tour: " + tourDate + " · " : ""}${fmtKm(r.total)} km · ${r.segments.length} Abschnitte · ${r.hints.length} Hinweise · erstellt ${now}</div>`;
+
+  // Karte auf das Druckformat neu einpassen, sonst bleiben Kacheln leer
+  if (map) {
+    map.invalidateSize();
+    const pts = r.pts.filter(p => p.lat && p.lon).map(p => [p.lat, p.lon]);
+    if (pts.length) map.fitBounds(pts, { padding: [20,20] });
+  }
+  // kurz warten, bis Kacheln nachgeladen sind
+  setTimeout(() => window.print(), map ? 900 : 100);
+}
+</script>
+</body>
+</html>
